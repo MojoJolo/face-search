@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002';
 
 const initialParams = {
   min_face_size: 80,
