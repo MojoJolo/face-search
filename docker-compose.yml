@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: face-search-postgres
+    environment:
+      POSTGRES_DB: face_search
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+
+  backend:
+    build:
+      context: ./backend
+    container_name: face-search-backend
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/face_search
+      PHOTOS_ROOT: /data/photos
+      INSIGHTFACE_MODEL_NAME: buffalo_l
+      INSIGHTFACE_CTX_ID: -1
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./backend:/app
+      - ./photos:/data/photos
+      - insightface_models:/root/.insightface
+    depends_on:
+      - postgres
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: face-search-frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8001
+    ports:
+      - "5175:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  insightface_models:
