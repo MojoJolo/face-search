@@ -22,7 +22,7 @@ services:
       INSIGHTFACE_MODEL_NAME: buffalo_l
       INSIGHTFACE_CTX_ID: -1
     ports:
-      - "8001:8000"
+      - "8002:8000"
     volumes:
       - ./backend:/app
       - ./photos:/data/photos
@@ -35,7 +35,7 @@ services:
       context: ./frontend
     container_name: face-search-frontend
     environment:
-      VITE_API_BASE_URL: http://localhost:8001
+      VITE_API_BASE_URL: http://localhost:8002
     ports:
       - "5175:5173"
     volumes:
