@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -10,6 +11,7 @@ from pydantic import BaseModel, Field
 from app.db import get_db
 from app.ingest import ingest_folder, ingest_uploaded_files
 from app.insightface_service import decode_image, ensure_rgb
+from app.jobs import JobStatus, create_job, get_job
 from app.search import search_similar_faces
 
 
@@ -25,6 +27,40 @@ class IngestRequest(BaseModel):
     max_faces: int = 20
 
 
+def _run_folder_ingest(job, payload: IngestRequest) -> None:
+    try:
+        with get_db() as conn:
+            ingest_folder(
+                conn=conn,
+                folder_path=payload.folder_path,
+                recursive=payload.recursive,
+                min_face_size=payload.min_face_size,
+                det_threshold=payload.det_threshold,
+                max_faces=payload.max_faces,
+                job=job,
+            )
+    except Exception as exc:
+        job.status = JobStatus.FAILED
+        job.error = str(exc)
+
+
+def _run_upload_ingest(job, file_data, min_face_size, det_threshold, max_faces) -> None:
+    try:
+        with get_db() as conn:
+            ingest_uploaded_files(
+                conn=conn,
+                files=file_data,
+                upload_dir=PHOTOS_ROOT,
+                min_face_size=min_face_size,
+                det_threshold=det_threshold,
+                max_faces=max_faces,
+                job=job,
+            )
+    except Exception as exc:
+        job.status = JobStatus.FAILED
+        job.error = str(exc)
+
+
 @router.get("/health")
 def healthcheck() -> dict:
     return {"status": "ok"}
@@ -36,18 +72,10 @@ def ingest_images(payload: IngestRequest) -> dict:
     if not folder.exists() or not folder.is_dir():
         raise HTTPException(status_code=400, detail="Folder path does not exist or is not a directory")
 
-    with get_db() as conn:
-        try:
-            return ingest_folder(
-                conn=conn,
-                folder_path=payload.folder_path,
-                recursive=payload.recursive,
-                min_face_size=payload.min_face_size,
-                det_threshold=payload.det_threshold,
-                max_faces=payload.max_faces,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    job = create_job()
+    thread = threading.Thread(target=_run_folder_ingest, args=(job, payload), daemon=True)
+    thread.start()
+    return {"job_id": job.id}
 
 
 @router.post("/ingest-upload")
@@ -59,18 +87,60 @@ async def ingest_uploaded_images(
 ) -> dict:
     file_data = [(upload.filename or "upload", await upload.read()) for upload in files]
 
+    job = create_job()
+    thread = threading.Thread(
+        target=_run_upload_ingest,
+        args=(job, file_data, min_face_size, det_threshold, max_faces),
+        daemon=True,
+    )
+    thread.start()
+    return {"job_id": job.id}
+
+
+@router.get("/ingest-status/{job_id}")
+def ingest_status(job_id: str) -> dict:
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job.to_dict()
+
+
+@router.get("/ingested-images")
+def ingested_images(limit: int = 50, offset: int = 0) -> dict:
     with get_db() as conn:
-        try:
-            return ingest_uploaded_files(
-                conn=conn,
-                files=file_data,
-                upload_dir=PHOTOS_ROOT,
-                min_face_size=min_face_size,
-                det_threshold=det_threshold,
-                max_faces=max_faces,
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select i.id, i.file_path, i.created_at,
+                       json_agg(json_build_object(
+                           'bbox', json_build_object(
+                               'x1', f.bbox_x1, 'y1', f.bbox_y1,
+                               'x2', f.bbox_x2, 'y2', f.bbox_y2
+                           ),
+                           'det_score', f.det_score
+                       )) as faces
+                from images i
+                join faces f on f.image_id = i.id
+                group by i.id
+                order by i.created_at desc
+                limit %s offset %s
+                """,
+                (limit, offset),
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            rows = cur.fetchall()
+
+            cur.execute("select count(*) as total from images i where exists (select 1 from faces f where f.image_id = i.id)")
+            total = cur.fetchone()["total"]
+
+    images = [
+        {
+            "image_path": row["file_path"],
+            "faces": row["faces"],
+            "created_at": row["created_at"].isoformat(),
+        }
+        for row in rows
+    ]
+    return {"images": images, "total": total}
 
 
 @router.post("/search")

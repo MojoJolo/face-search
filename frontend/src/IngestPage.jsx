@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -54,13 +54,80 @@ function PreviewImage({ imagePath, faces }) {
   );
 }
 
+function ProgressBar({ processed, total }) {
+  const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+  return (
+    <div className="progress-wrap">
+      <div className="progress-bar">
+        <div className="progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <span className="progress-label">
+        {processed} / {total} images ({pct}%)
+      </span>
+    </div>
+  );
+}
+
 export default function IngestPage() {
   const [params, setParams] = useState(initialParams);
   const [files, setFiles] = useState([]);
   const [response, setResponse] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [job, setJob] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
   const fileInputRef = useRef(null);
+  const pollingRef = useRef(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/ingested-images`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setHistory(data.images);
+      setHistoryTotal(data.total);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+    return stopPolling;
+  }, [loadHistory, stopPolling]);
+
+  function startPolling(jobId) {
+    stopPolling();
+    pollingRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`${apiBaseUrl}/ingest-status/${jobId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setJob(data);
+
+        if (data.status === 'completed' || data.status === 'failed') {
+          stopPolling();
+          setLoading(false);
+          if (data.status === 'completed') {
+            setResponse(data);
+            loadHistory();
+          } else {
+            setError(data.error || 'Ingest failed');
+          }
+        }
+      } catch {
+        // keep polling on transient network errors
+      }
+    }, 1000);
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -71,6 +138,7 @@ export default function IngestPage() {
     setLoading(true);
     setError('');
     setResponse(null);
+    setJob(null);
 
     const formData = new FormData();
     for (const file of files) {
@@ -89,10 +157,9 @@ export default function IngestPage() {
       if (!res.ok) {
         throw new Error(data.detail || 'Ingest failed');
       }
-      setResponse(data);
+      startPolling(data.job_id);
     } catch (err) {
       setError(err.message);
-    } finally {
       setLoading(false);
     }
   }
@@ -187,6 +254,14 @@ export default function IngestPage() {
         </button>
       </form>
 
+      {loading && job ? (
+        <div className="result-card">
+          <h3>Processing...</h3>
+          <ProgressBar processed={job.images_processed} total={job.images_total} />
+          {job.current_file ? <p className="hint">Current: {job.current_file}</p> : null}
+        </div>
+      ) : null}
+
       {error ? <p className="error-banner">{error}</p> : null}
 
       {response ? (
@@ -210,6 +285,21 @@ export default function IngestPage() {
           {response.skipped_files.length > 0 ? (
             <pre>{JSON.stringify(response.skipped_files, null, 2)}</pre>
           ) : null}
+        </div>
+      ) : null}
+
+      {history.length > 0 ? (
+        <div className="result-card">
+          <h3>Indexed Images ({historyTotal})</h3>
+          <div className="results-grid">
+            {history.map((image) => (
+              <article key={image.image_path} className="match-card">
+                <PreviewImage imagePath={image.image_path} faces={image.faces} />
+                <p className="match-path">{image.image_path}</p>
+                <p>Faces: {image.faces.length}</p>
+              </article>
+            ))}
+          </div>
         </div>
       ) : null}
     </section>

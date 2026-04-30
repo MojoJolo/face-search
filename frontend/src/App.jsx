@@ -3,8 +3,8 @@ import IngestPage from './IngestPage';
 import SearchPage from './SearchPage';
 
 const navItems = [
-  { to: '/ingest', label: 'Ingest' },
-  { to: '/search', label: 'Search' },
+  { to: '/app/ingest', label: 'Ingest' },
+  { to: '/app/search', label: 'Search' },
 ];
 
 export default function App() {
@@ -33,9 +33,9 @@ export default function App() {
 
       <main className="content">
         <Routes>
-          <Route path="/" element={<Navigate to="/ingest" replace />} />
-          <Route path="/ingest" element={<IngestPage />} />
-          <Route path="/search" element={<SearchPage />} />
+          <Route path="/" element={<Navigate to="/app/ingest" replace />} />
+          <Route path="/app/ingest" element={<IngestPage />} />
+          <Route path="/app/search" element={<SearchPage />} />
         </Routes>
       </main>
     </div>

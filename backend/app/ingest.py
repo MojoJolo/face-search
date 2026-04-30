@@ -8,6 +8,7 @@ from uuid import uuid4
 from psycopg import Connection
 
 from app.insightface_service import decode_image, ensure_rgb, get_face_analyzer
+from app.jobs import Job, JobStatus
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
@@ -118,22 +119,24 @@ def ingest_folder(
     min_face_size: int,
     det_threshold: float,
     max_faces: int,
-) -> dict:
+    job: Job,
+) -> None:
     analyzer = get_face_analyzer()
-    image_count = 0
-    face_count = 0
-    preview_images: list[dict] = []
-    skipped_files: list[dict] = []
 
-    for image_path in iter_image_paths(folder_path, recursive):
-        image_count += 1
+    image_paths = list(iter_image_paths(folder_path, recursive))
+    job.images_total = len(image_paths)
+    job.status = JobStatus.RUNNING
+
+    for image_path in image_paths:
+        job.current_file = str(image_path)
         image_bytes = image_path.read_bytes()
         mime_type, _ = mimetypes.guess_type(str(image_path))
         if mime_type is None or not mime_type.startswith("image/"):
-            skipped_files.append({"file_path": str(image_path), "reason": "unsupported mime type"})
+            job.skipped_files.append({"file_path": str(image_path), "reason": "unsupported mime type"})
+            job.images_processed += 1
             continue
 
-        face_count += _process_image(
+        faces = _process_image(
             conn=conn,
             image_path=image_path,
             image_bytes=image_bytes,
@@ -142,17 +145,15 @@ def ingest_folder(
             min_face_size=min_face_size,
             det_threshold=det_threshold,
             max_faces=max_faces,
-            skipped_files=skipped_files,
-            preview_images=preview_images,
+            skipped_files=job.skipped_files,
+            preview_images=job.preview_images,
         )
+        job.faces_stored += faces
+        job.images_processed += 1
 
     conn.commit()
-    return {
-        "images_processed": image_count,
-        "faces_stored": face_count,
-        "preview_images": preview_images,
-        "skipped_files": skipped_files,
-    }
+    job.current_file = ""
+    job.status = JobStatus.COMPLETED
 
 
 def ingest_uploaded_files(
@@ -162,27 +163,27 @@ def ingest_uploaded_files(
     min_face_size: int,
     det_threshold: float,
     max_faces: int,
-) -> dict:
+    job: Job,
+) -> None:
     analyzer = get_face_analyzer()
     upload_path = Path(upload_dir)
     upload_path.mkdir(parents=True, exist_ok=True)
 
-    image_count = 0
-    face_count = 0
-    preview_images: list[dict] = []
-    skipped_files: list[dict] = []
+    job.images_total = len(files)
+    job.status = JobStatus.RUNNING
 
     for original_name, image_bytes in files:
         suffix = Path(original_name).suffix.lower()
         if suffix not in IMAGE_EXTENSIONS:
-            skipped_files.append({"file_path": original_name, "reason": "unsupported file type"})
+            job.skipped_files.append({"file_path": original_name, "reason": "unsupported file type"})
+            job.images_processed += 1
             continue
 
         saved_path = upload_path / f"{uuid4().hex}_{Path(original_name).name}"
         saved_path.write_bytes(image_bytes)
-        image_count += 1
 
-        face_count += _process_image(
+        job.current_file = original_name
+        faces = _process_image(
             conn=conn,
             image_path=saved_path,
             image_bytes=image_bytes,
@@ -191,14 +192,12 @@ def ingest_uploaded_files(
             min_face_size=min_face_size,
             det_threshold=det_threshold,
             max_faces=max_faces,
-            skipped_files=skipped_files,
-            preview_images=preview_images,
+            skipped_files=job.skipped_files,
+            preview_images=job.preview_images,
         )
+        job.faces_stored += faces
+        job.images_processed += 1
 
     conn.commit()
-    return {
-        "images_processed": image_count,
-        "faces_stored": face_count,
-        "preview_images": preview_images,
-        "skipped_files": skipped_files,
-    }
+    job.current_file = ""
+    job.status = JobStatus.COMPLETED
