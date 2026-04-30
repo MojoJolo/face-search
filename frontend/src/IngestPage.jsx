@@ -1,10 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
 
-const initialForm = {
-  folder_path: '/data/photos',
-  recursive: true,
+const initialParams = {
   min_face_size: 80,
   det_threshold: 0.6,
   max_faces: 20,
@@ -57,27 +55,35 @@ function PreviewImage({ imagePath, faces }) {
 }
 
 export default function IngestPage() {
-  const [form, setForm] = useState(initialForm);
+  const [params, setParams] = useState(initialParams);
+  const [files, setFiles] = useState([]);
   const [response, setResponse] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const fileInputRef = useRef(null);
 
   async function handleSubmit(event) {
     event.preventDefault();
+    if (files.length === 0) {
+      setError('Please select at least one image.');
+      return;
+    }
     setLoading(true);
     setError('');
     setResponse(null);
 
+    const formData = new FormData();
+    for (const file of files) {
+      formData.append('files', file);
+    }
+    formData.append('min_face_size', String(params.min_face_size));
+    formData.append('det_threshold', String(params.det_threshold));
+    formData.append('max_faces', String(params.max_faces));
+
     try {
-      const res = await fetch(`${apiBaseUrl}/ingest`, {
+      const res = await fetch(`${apiBaseUrl}/ingest-upload`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          min_face_size: Number(form.min_face_size),
-          det_threshold: Number(form.det_threshold),
-          max_faces: Number(form.max_faces),
-        }),
+        body: formData,
       });
       const data = await res.json();
       if (!res.ok) {
@@ -91,35 +97,69 @@ export default function IngestPage() {
     }
   }
 
-  function updateField(key, value) {
-    setForm((current) => ({ ...current, [key]: value }));
+  function updateParam(key, value) {
+    setParams((current) => ({ ...current, [key]: value }));
+  }
+
+  function handleFileChange(event) {
+    setFiles(Array.from(event.target.files));
+  }
+
+  function handleDrop(event) {
+    event.preventDefault();
+    const dropped = Array.from(event.dataTransfer.files).filter((f) =>
+      f.type.startsWith('image/'),
+    );
+    setFiles(dropped);
   }
 
   return (
     <section className="panel">
       <div className="panel-header">
         <div>
-          <p className="section-tag">Folder Ingest</p>
-          <h2>Index mounted photos</h2>
+          <p className="section-tag">Photo Ingest</p>
+          <h2>Upload photos to index</h2>
         </div>
-        <p className="hint">Default Docker mount: `/data/photos`</p>
+        <p className="hint">
+          {files.length > 0 ? `${files.length} file(s) selected` : 'Select images to upload'}
+        </p>
       </div>
 
       <form className="form-grid" onSubmit={handleSubmit}>
-        <label>
-          Folder path
+        <label
+          className="file-upload-area"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+        >
           <input
-            value={form.folder_path}
-            onChange={(event) => updateField('folder_path', event.target.value)}
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleFileChange}
           />
+          <span className="file-upload-icon">&#8593;</span>
+          {files.length === 0 ? (
+            <>
+              <span className="file-upload-primary">Click or drag &amp; drop images</span>
+              <span className="file-upload-sub">JPG, PNG, WEBP, BMP supported</span>
+            </>
+          ) : (
+            <>
+              <span className="file-upload-primary">{files.length} image(s) selected</span>
+              <span className="file-upload-sub">Click to change selection</span>
+            </>
+          )}
         </label>
+
         <label>
           Min face size
           <input
             type="number"
             min="1"
-            value={form.min_face_size}
-            onChange={(event) => updateField('min_face_size', event.target.value)}
+            value={params.min_face_size}
+            onChange={(event) => updateParam('min_face_size', event.target.value)}
           />
         </label>
         <label>
@@ -129,8 +169,8 @@ export default function IngestPage() {
             min="0"
             max="1"
             step="0.05"
-            value={form.det_threshold}
-            onChange={(event) => updateField('det_threshold', event.target.value)}
+            value={params.det_threshold}
+            onChange={(event) => updateParam('det_threshold', event.target.value)}
           />
         </label>
         <label>
@@ -138,19 +178,11 @@ export default function IngestPage() {
           <input
             type="number"
             min="1"
-            value={form.max_faces}
-            onChange={(event) => updateField('max_faces', event.target.value)}
+            value={params.max_faces}
+            onChange={(event) => updateParam('max_faces', event.target.value)}
           />
         </label>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={form.recursive}
-            onChange={(event) => updateField('recursive', event.target.checked)}
-          />
-          Scan subfolders recursively
-        </label>
-        <button className="primary-button" type="submit" disabled={loading}>
+        <button className="primary-button" type="submit" disabled={loading || files.length === 0}>
           {loading ? 'Indexing...' : 'Start ingest'}
         </button>
       </form>

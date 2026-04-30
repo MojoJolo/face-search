@@ -141,6 +141,43 @@ input {
   width: auto;
 }
 
+.file-upload-area {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 28px 20px;
+  border-radius: 18px;
+  border: 2px dashed rgba(125, 211, 252, 0.35);
+  background: rgba(15, 23, 42, 0.55);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  text-align: center;
+}
+
+.file-upload-area:hover {
+  border-color: rgba(125, 211, 252, 0.75);
+  background: rgba(56, 189, 248, 0.07);
+}
+
+.file-upload-icon {
+  font-size: 2rem;
+  color: #7dd3fc;
+  line-height: 1;
+}
+
+.file-upload-primary {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.file-upload-sub {
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
 .primary-button {
   border: 0;
   border-radius: 16px;

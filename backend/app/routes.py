@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.db import get_db
-from app.ingest import ingest_folder
+from app.ingest import ingest_folder, ingest_uploaded_files
 from app.insightface_service import decode_image, ensure_rgb
 from app.search import search_similar_faces
 
@@ -45,6 +45,29 @@ def ingest_images(payload: IngestRequest) -> dict:
                 min_face_size=payload.min_face_size,
                 det_threshold=payload.det_threshold,
                 max_faces=payload.max_faces,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/ingest-upload")
+async def ingest_uploaded_images(
+    files: list[UploadFile] = File(...),
+    min_face_size: int = Form(default=80),
+    det_threshold: float = Form(default=0.6),
+    max_faces: int = Form(default=20),
+) -> dict:
+    file_data = [(upload.filename or "upload", await upload.read()) for upload in files]
+
+    with get_db() as conn:
+        try:
+            return ingest_uploaded_files(
+                conn=conn,
+                files=file_data,
+                upload_dir=PHOTOS_ROOT,
+                min_face_size=min_face_size,
+                det_threshold=det_threshold,
+                max_faces=max_faces,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

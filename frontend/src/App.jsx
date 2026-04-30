@@ -12,7 +12,7 @@ export default function App() {
     <div className="shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">InsightFace + pgvector</p>
+          <p className="eyebrow">Aitonomee Face Technology</p>
           <h1>Local Face Search Prototype</h1>
           <p className="subtitle">
             Ingest a mounted photo folder, then search similar faces from a selfie upload.
